@@ -151,7 +151,7 @@ public final class TNetstring {
 	@SuppressWarnings("unchecked")
 	public static <T> T parseWithBytesAsString(final byte[] msg, int offset, final Charset charset,
 			ParseMode parseMode) {
-		return (T) internalParse(msg, offset, charset);
+		return (T) internalParse(msg, offset, charset, parseMode);
 	}
 	
 	
@@ -213,7 +213,7 @@ public final class TNetstring {
 			byte[] remainder = Arrays.copyOfRange(msg, size + i +1, msg.length);
 			while (remainder.length > 3) {
 				@SuppressWarnings("unchecked")
-				List<Object> next = (List<Object>) internalParse(remainder, 0, null, ParseMode.POP);
+				List<Object> next = (List<Object>) internalParse(remainder, 0, charset, ParseMode.POP);
 				result.add(next.get(0));
 				remainder = (byte[]) next.get(1);
 			}
