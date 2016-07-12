@@ -16,6 +16,7 @@ package org.tnetstrings;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.tnetstrings.TNetstring.dump;
 import static org.tnetstrings.TNetstring.parse;
 import static org.tnetstrings.TNetstring.parseSize;
@@ -30,6 +31,7 @@ import java.util.Locale;
 import java.util.Map;
 
 import org.junit.Test;
+import org.tnetstrings.TNetstring.ParseMode;
 
 public class TNetstringTest {
 
@@ -251,5 +253,95 @@ public class TNetstringTest {
 		final float[] nullFloats = null;
 		assertArrayEquals("0:~".getBytes(ASCII), TNetstring.dump(nullFloats));
 	}
-
+	
+	@SuppressWarnings("unchecked")
+	@Test
+	public void testPopModeEmpty() {
+		final String[] tnetstrings = new String[] {
+				"4:true!", "5:false!", "72:3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^]",
+				"28:1:1#6:500000#8:-1202020#1:0#]", "12:0.0000001001^",
+				"127:6:METHOD,4:HEAD,3:URI,17:/virt/tst_11/r503,7:VERSION,8:HTTP/1.1,4:PATH,17:/virt/tst_11/r503,4:host,0:,15:accept-encoding,3:foo,}0:,",
+				"5:12345#", "32:5:hello,5:12345#5:hello,5:56789#]"
+		};
+		byte[] remainder;
+		for (String teststring : tnetstrings) {
+			byte[] testbytes = teststring.getBytes(ASCII);
+			Object parsed = parse(testbytes, ParseMode.POP);
+			assertTrue(parsed instanceof List<?>);
+			remainder = (byte[])((List<Object>) parsed).get(1);
+			// "" is an empty String as well as "0:,"
+			assertTrue("".equals(TNetstring.parseString(remainder, 0, remainder.length, ASCII)) 
+					|| "0:,".equals(TNetstring.parseString(remainder, 0, remainder.length, ASCII)));
+		}
+	}
+	
+	@SuppressWarnings("unchecked")
+	@Test
+	public void testPopMode() {
+		assertEquals(12345L, ((List<Object>)parse(dump(12345L), ParseMode.POP)).get(0));
+		assertEquals(Long.valueOf(12345L), ((List<Object>)parse(dump(Long.valueOf(12345L)), 
+				ParseMode.POP)).get(0));
+		assertEquals(true, ((List<Object>)parse(dump(true), ParseMode.POP)).get(0));
+		assertEquals(false, ((List<Object>)parse(dump(false), ParseMode.POP)).get(0));
+		final ArrayList<Long> longs = new ArrayList<Long>();
+		assertEquals(longs, ((List<Object>)parse(dump(longs), ParseMode.POP)).get(0));
+		longs.add(12345L);
+		longs.add(45678L);
+		assertEquals(longs, ((List<Object>)parse(dump(longs), ParseMode.POP)).get(0));
+		assertArrayEquals("foo".getBytes(ASCII), (byte[]) ((List<Object>)parse(dump("foo", ASCII), ParseMode.POP)).get(0));
+		final ArrayList<String> strings = new ArrayList<String>();
+		assertEquals(strings, ((List<Object>)parse(dump(strings), ParseMode.POP)).get(0));
+		
+		final String[] tnetstrings = new String[] {
+				"4:true!5:false!72:3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^]",
+				"28:1:1#6:500000#8:-1202020#1:0#]12:0.0000001001^",
+				"5:12345#32:5:hello,5:12345#5:hello,5:56789#]"
+		};
+		
+		byte[] testbytes;
+		Object parsed;
+		byte[] remainder;
+		
+		testbytes = tnetstrings[0].getBytes(ASCII);
+		parsed = parse(testbytes, ParseMode.POP);
+		assertTrue(parsed instanceof List<?>);
+		remainder = (byte[])((List<Object>) parsed).get(1);
+		assertEquals("5:false!72:3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^3:0.0^3:0.0^3:1.0^]",
+				TNetstring.parseString(remainder, 0, remainder.length, ASCII));
+		
+		testbytes = tnetstrings[1].getBytes(ASCII);
+		parsed = parse(testbytes, ParseMode.POP);
+		assertTrue(parsed instanceof List<?>);
+		remainder = (byte[])((List<Object>) parsed).get(1);
+		assertEquals("12:0.0000001001^",
+				TNetstring.parseString(remainder, 0, remainder.length, ASCII));
+		
+		testbytes = tnetstrings[2].getBytes(ASCII);
+		parsed = parse(testbytes, ParseMode.POP);
+		assertTrue(parsed instanceof List<?>);
+		remainder = (byte[])((List<Object>) parsed).get(1);
+		assertEquals("32:5:hello,5:12345#5:hello,5:56789#]",
+				TNetstring.parseString(remainder, 0, remainder.length, ASCII));
+	}
+	
+	@Test
+	@SuppressWarnings("unchecked")
+	public void randomizedTestAll() {
+		// 2048 random strings
+		String[] randomStrings = RandomStringGenerator.generateRandomNetstrings(2048);
+		
+		StringBuilder sb = new StringBuilder();
+		for (String s : randomStrings) {
+			sb.append(s);
+		}
+		List<Object> parsed = (List<Object>)TNetstring.parse(sb.toString().getBytes(), ParseMode.ALL);
+		assertEquals(parsed.size(), randomStrings.length);
+		int ctr = 0;
+		for(Object o : (List<Object>) parsed) {
+			byte[] netstring = TNetstring.dump(o);
+			assertEquals(randomStrings[ctr],
+					TNetstring.parseString(netstring, 0, netstring.length, ASCII));
+			ctr++;
+		}
+	}
 }

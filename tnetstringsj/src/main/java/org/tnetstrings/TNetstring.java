@@ -19,6 +19,7 @@ import java.nio.charset.Charset;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,11 +59,34 @@ import java.util.Map.Entry;
  * converted them to Strings.
  * 
  * @author Armando Singer (armando.singer at gmail dot com)
+ * @author Michael Eder (spam@michael-eder.net)
  */
 public final class TNetstring {
 
 	private TNetstring() {
 	}
+	
+	/**
+	 * Parse modes that may be used in order to control how multiple consecutive 
+	 * tnetstrings are processed
+	 */
+	public static enum ParseMode {
+		
+		/**
+		 * Only returns the first netstring. This is the old behaviour.
+		 */
+		FIRST, 
+		
+		/**
+		 * Returns a List<Object>, containing the parsed first netstring 
+		 * at position 0 and the remaining raw data at position 1
+		 */
+		POP, 
+		
+		/**
+		 * Returns a List<Object> containing all parsed netstrings
+		 */
+		ALL};
 
 	private static final Charset ASCII = Charset.forName("US-ASCII");
 
@@ -73,7 +97,7 @@ public final class TNetstring {
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T> T parse(final byte[] msg) {
-		return (T) parse(msg, 0, null);
+		return (T) internalParse(msg, 0, null);
 	}
 
 	/**
@@ -81,7 +105,24 @@ public final class TNetstring {
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T> T parse(final byte[] msg, int offset) {
-		return (T) parse(msg, offset, null);
+		return (T) internalParse(msg, offset, null);
+	}
+	
+	/**
+	 * Same as {@link #parse(byte[])} and applies the given ParseMode
+	 */
+	@SuppressWarnings("unchecked")
+	public static <T> T parse(final byte[] msg, ParseMode parseMode) {
+		return (T) internalParse(msg, 0, null, parseMode);
+	}
+	
+	/**
+	 * Same as {@link #parse(byte[], int)} but starts from the specified offset index
+	 * and applies the given ParseMode
+	 */
+	@SuppressWarnings("unchecked")
+	public static <T> T parse(final byte[] msg, int offset, ParseMode parseMode) {
+		return (T) internalParse(msg, offset, null, parseMode);
 	}
 
 	/**
@@ -95,7 +136,7 @@ public final class TNetstring {
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T> T parseWithBytesAsString(final byte[] msg, final Charset charset) {
-		return (T) parse(msg, 0, charset);
+		return (T) internalParse(msg, 0, charset);
 	}
 
 	/**
@@ -104,14 +145,27 @@ public final class TNetstring {
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T> T parseWithBytesAsString(final byte[] msg, int offset, final Charset charset) {
-		return (T) parse(msg, offset, charset);
+		return (T) internalParse(msg, offset, charset);
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static <T> T parseWithBytesAsString(final byte[] msg, int offset, final Charset charset,
+			ParseMode parseMode) {
+		return (T) internalParse(msg, offset, charset);
+	}
+	
+	
+	private static Object internalParse(final byte[] msg, final int offset, final Charset charset) {
+		return internalParse(msg, offset, charset, ParseMode.FIRST);
 	}
 
 	/**
 	 * Internal parsing impl w/ an optimization if we want a String that
 	 * prevents double copy
 	 */
-	private static Object parse(final byte[] msg, final int offset, final Charset charset) {
+	@SuppressWarnings("serial")
+	private static Object internalParse(final byte[] msg, final int offset, final Charset charset, 
+			final ParseMode parseMode) {
 		if (msg == null || msg.length < 3) {
 			throw new IllegalArgumentException("Nestring can't be null or < 3 length");
 		}
@@ -121,26 +175,51 @@ public final class TNetstring {
 			throw new IllegalArgumentException("Invalid tnetstring size. Can't be > msg size");
 		}
 		final int typeIndex = i + size;
-		switch (msg[typeIndex]) {
-		case ',':
-			return charset == null ? copyRange(msg, i, size) : parseString(msg, i, size, charset);
-		case '}':
-			return parseDict(msg, i, size, charset);
-		case ']':
-			return parseList(msg, i, size, charset);
-		case '#':
-			return parseLong(msg, i, typeIndex);
-		case '^':
-			return parseDouble(msg, i, typeIndex);
-		case '!':
-			return msg[i] == 't' && msg[i + 1] == 'r' && msg[i + 2] == 'u' && msg[i + 3] == 'e';
-		case '~':
+		
+		final Object parsed;
+		if (msg[typeIndex] == ',') {
+			parsed = charset == null ? Arrays.copyOfRange(msg, i, i + size) : parseString(msg, i, size, charset);
+		} else if (msg[typeIndex] ==  '}') {
+			parsed = parseDict(msg, i, size, charset);
+		} else if (msg[typeIndex] ==  ']') {
+			parsed = parseList(msg, i, size, charset);
+		} else if (msg[typeIndex] ==  '#') {
+			parsed = parseLong(msg, i, typeIndex);
+		} else if (msg[typeIndex] ==  '^') {
+			parsed = parseDouble(msg, i, typeIndex);
+		} else if (msg[typeIndex] ==  '!') {
+			parsed = msg[i] == 't' && msg[i + 1] == 'r' && msg[i + 2] == 'u' && msg[i + 3] == 'e';
+		} else if (msg[typeIndex] ==  '~') {
 			if (size != 0) {
 				throw new IllegalArgumentException("Payload must be 0 length for null.");
 			}
 			return null;
-		default:
-			throw new IllegalArgumentException("Invalid payload type: " + msg[typeIndex] + " at index: " + typeIndex);
+		} else {
+			throw new IllegalArgumentException("Invalid payload type: " + msg[typeIndex] + 
+					" at index: " + typeIndex);
+		}
+		if (parseMode == ParseMode.FIRST) {
+			return parsed;
+		} else if (parseMode == ParseMode.POP) {
+			return new ArrayList<Object>(2) {
+				{	
+					add(parsed);
+					add(Arrays.copyOfRange(msg, size + i + 1, msg.length));
+				}
+			};
+		} else if (parseMode == ParseMode.ALL) {
+			List<Object> result = new ArrayList<Object>();
+			result.add(parsed);
+			byte[] remainder = Arrays.copyOfRange(msg, size + i +1, msg.length);
+			while (remainder.length > 3) {
+				@SuppressWarnings("unchecked")
+				List<Object> next = (List<Object>) internalParse(remainder, 0, null, ParseMode.POP);
+				result.add(next.get(0));
+				remainder = (byte[]) next.get(1);
+			}
+			return result;
+		} else {
+			return null;
 		}
 	}
 
@@ -188,7 +267,7 @@ public final class TNetstring {
 			final int keyDataIndex = dataIndex(msg, keyIndex);
 			final int keySize = parseSize(msg, keyIndex, keyDataIndex - 1);
 			final int valueIndex = keyDataIndex + keySize + 1;
-			map.put(parse(msg, keyIndex, charset), parse(msg, valueIndex, charset));
+			map.put(internalParse(msg, keyIndex, charset), internalParse(msg, valueIndex, charset));
 			final int valueDataIndex = dataIndex(msg, valueIndex);
 			final int valueSize = parseSize(msg, valueIndex, valueDataIndex - 1);
 			keyIndex = valueDataIndex + valueSize + 1;
@@ -204,7 +283,7 @@ public final class TNetstring {
 		final List<Object> list = new ArrayList<Object>();
 		final int limit = dataIndex + size;
 		for (int elementIndex = dataIndex; elementIndex < limit;) {
-			list.add(parse(msg, elementIndex, charset));
+			list.add(internalParse(msg, elementIndex, charset));
 			final int elementSize = parseSize(msg, elementIndex, dataIndex(msg, elementIndex) - 1);
 			elementIndex = dataIndex(msg, elementIndex) + elementSize + 1;
 		}
@@ -219,12 +298,6 @@ public final class TNetstring {
 		}
 		throw new IllegalArgumentException(
 				"TNetstring does not have a ':' between offset " + offset + " and length " + msg.length);
-	}
-
-	private static byte[] copyRange(final byte[] msg, final int offset, final int size) {
-		final byte[] copy = new byte[size];
-		System.arraycopy(msg, offset, copy, 0, Math.min(msg.length - offset, size));
-		return copy;
 	}
 
 	private static final long LONG_MULTMIN = Long.MIN_VALUE / 10;
